@@ -25,6 +25,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       action: "document_downloaded",
       companyId: doc.company_id,
       signatureRequestId: doc.signature_request_id,
+      candidateId: doc.candidate_id ?? null,
       detail: { document_id: doc.id, sha256: doc.sha256 },
       ipAddress: ctx.ipAddress,
       userAgent: ctx.userAgent,

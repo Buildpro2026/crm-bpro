@@ -4,6 +4,10 @@ export type FormState =
       error?: string;
       fieldErrors?: Record<string, string>;
       values?: Record<string, string>;
+      // Set by inline forms that stay on the page after saving, so the form
+      // can clear itself. savedAt changes on every successful save.
+      ok?: boolean;
+      savedAt?: number;
     }
   | undefined;
 

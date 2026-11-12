@@ -13,6 +13,15 @@ const MIGRATION = readFileSync(
   fileURLToPath(new URL("../supabase/migrations/0001_milestone1_foundation.sql", import.meta.url)),
   "utf8",
 );
+const MIGRATION_2 = readFileSync(
+  fileURLToPath(new URL("../supabase/migrations/0002_milestone2_crm_core.sql", import.meta.url)),
+  "utf8",
+);
+
+const MIGRATION_3 = readFileSync(
+  fileURLToPath(new URL("../supabase/migrations/0003_candidates_and_files.sql", import.meta.url)),
+  "utf8",
+);
 
 const OWNER_ID = "11111111-1111-4111-8111-111111111111";
 const STRANGER_ID = "22222222-2222-4222-8222-222222222222";
@@ -70,6 +79,8 @@ beforeAll(async () => {
   db = await PGlite.create();
   await db.exec(SUPABASE_STUBS);
   await db.exec(MIGRATION);
+  await db.exec(MIGRATION_2);
+  await db.exec(MIGRATION_3);
   await db.exec(`grant select, insert, update, delete on all tables in schema public to authenticated`);
   await db.exec(`grant execute on all functions in schema public to authenticated`);
   await db.exec(`grant all on all tables in schema public to service_role`);
@@ -223,6 +234,175 @@ describe("constraints", () => {
       [HASH],
     );
     expect(error).toMatch(/check constraint/i);
+  });
+});
+
+describe("milestone 2: deals, notes, tasks", () => {
+  const OTHER_COMPANY = "44444444-4444-4444-8444-444444444444";
+  let companyId = "";
+  let contactId = "";
+  let dealId = "";
+
+  it("adds status, phone and source to companies, defaulting status to prospect", async () => {
+    await asPostgres();
+    const { rows } = await db.query<{ status: string }>(
+      `insert into companies (name, phone, source) values ('M2 Co', '214-555-0100', 'referral') returning status`,
+    );
+    expect(rows[0].status).toBe("prospect");
+    expect(await attempt(`insert into companies (name, status) values ('Bad Co', 'friend')`)).toMatch(/check constraint/i);
+  });
+
+  it("the owner can create a deal, note and task linked to a company", async () => {
+    await asRole("authenticated", OWNER_ID);
+    companyId = (await db.query<{ id: string }>(`insert into companies (name) values ('Pipeline Co') returning id`)).rows[0].id;
+    contactId = (
+      await db.query<{ id: string }>(`insert into contacts (company_id, name) values ($1, 'Pat Buyer') returning id`, [companyId])
+    ).rows[0].id;
+    const deal = await db.query<{ id: string; stage: string; closed_at: string | null }>(
+      `insert into deals (company_id, contact_id, name, estimated_value) values ($1, $2, 'PM search', 25000) returning id, stage, closed_at`,
+      [companyId, contactId],
+    );
+    dealId = deal.rows[0].id;
+    expect(deal.rows[0].stage).toBe("new lead");
+    expect(deal.rows[0].closed_at).toBeNull();
+
+    const note = await attempt(`insert into notes (company_id, deal_id, body) values ($1, $2, 'Called Pat')`, [companyId, dealId]);
+    expect(note).toBeNull();
+    // A task linked only to a deal gets its company filled in.
+    const task = await db.query<{ company_id: string; status: string }>(
+      `insert into tasks (title, deal_id, due_date) values ('Send proposal', $1, current_date) returning company_id, status`,
+      [dealId],
+    );
+    expect(task.rows[0]).toEqual({ company_id: companyId, status: "open" });
+    const standalone = await attempt(`insert into tasks (title) values ('Update LinkedIn')`);
+    await asPostgres();
+    expect(standalone).toBeNull();
+  });
+
+  it("sets closed_at when a deal is won and clears it when reopened", async () => {
+    await asPostgres();
+    const won = await db.query<{ closed_at: string | null }>(`update deals set stage = 'won' where id = $1 returning closed_at`, [dealId]);
+    expect(won.rows[0].closed_at).not.toBeNull();
+    const reopened = await db.query<{ closed_at: string | null }>(
+      `update deals set stage = 'proposal sent' where id = $1 returning closed_at`,
+      [dealId],
+    );
+    expect(reopened.rows[0].closed_at).toBeNull();
+    expect(await attempt(`update deals set stage = 'maybe' where id = $1`, [dealId])).toMatch(/check constraint/i);
+  });
+
+  it("sets completed_at when a task is done and clears it when reopened", async () => {
+    await asPostgres();
+    const done = await db.query<{ completed_at: string | null }>(
+      `update tasks set status = 'done' where title = 'Send proposal' returning completed_at`,
+    );
+    expect(done.rows[0].completed_at).not.toBeNull();
+    const open = await db.query<{ completed_at: string | null }>(
+      `update tasks set status = 'open' where title = 'Send proposal' returning completed_at`,
+    );
+    expect(open.rows[0].completed_at).toBeNull();
+  });
+
+  it("rejects links to a contact or deal at a different company", async () => {
+    await asPostgres();
+    await db.query(`insert into companies (id, name) values ($1, 'Other Co')`, [OTHER_COMPANY]);
+    expect(
+      await attempt(`insert into deals (company_id, contact_id, name) values ($1, $2, 'Wrong')`, [OTHER_COMPANY, contactId]),
+    ).toMatch(/different company/);
+    expect(await attempt(`insert into notes (company_id, deal_id, body) values ($1, $2, 'x')`, [OTHER_COMPANY, dealId])).toMatch(
+      /different company/,
+    );
+    expect(await attempt(`insert into notes (company_id, body) values ($1, '   ')`, [companyId])).toMatch(/check constraint/i);
+  });
+
+  it("hides deals, notes and tasks from non-owners and anonymous visitors", async () => {
+    await asRole("authenticated", STRANGER_ID);
+    for (const table of ["deals", "notes", "tasks"]) {
+      const { rows } = await db.query(`select * from ${table}`);
+      expect(rows, table).toHaveLength(0);
+    }
+    const write = await attempt(`insert into tasks (title) values ('Sneaky')`);
+    await asPostgres();
+    expect(write).toMatch(/row-level security/i);
+
+    await asRole("anon");
+    const anon = await attempt(`select * from deals`);
+    await asPostgres();
+    if (anon !== null) expect(anon).toMatch(/permission denied/i);
+  });
+});
+
+describe("candidates, files and candidate agreements", () => {
+  let candidateId = "";
+
+  it("the owner can create a candidate with notes, tasks, files and an agreement link", async () => {
+    await asRole("authenticated", OWNER_ID);
+    const cand = await db.query<{ id: string; status: string }>(
+      `insert into candidates (full_name, phone) values ('Jordan Rivera', '214-555-0199') returning id, status`,
+    );
+    candidateId = cand.rows[0].id;
+    expect(cand.rows[0].status).toBe("new");
+
+    expect(await attempt(`insert into notes (candidate_id, body) values ($1, 'Phone screen went well')`, [candidateId])).toBeNull();
+    expect(await attempt(`insert into tasks (candidate_id, title) values ($1, 'Send agreement')`, [candidateId])).toBeNull();
+    expect(
+      await attempt(
+        `insert into documents (candidate_id, kind, folder, file_name, storage_path, sha256, mime_type)
+         values ($1, 'uploaded', 'resumes', 'resume.pdf', $2, $3, 'application/pdf')`,
+        [candidateId, `candidates/${candidateId}/resume.pdf`, HASH],
+      ),
+    ).toBeNull();
+    expect(
+      await attempt(
+        `insert into candidate_agreements (candidate_id, template_sha256, token_hash, expires_at)
+         values ($1, $2, $3, now() + interval '14 days')`,
+        [candidateId, HASH, "d".repeat(64)],
+      ),
+    ).toBeNull();
+    expect(
+      await attempt(`insert into audit_log (actor, candidate_id, action) values ('owner:test', $1, 'candidate_created')`, [candidateId]),
+    ).toBeNull();
+    await asPostgres();
+  });
+
+  it("requires every file and note to belong to a company or candidate", async () => {
+    await asPostgres();
+    expect(
+      await attempt(
+        `insert into documents (kind, file_name, storage_path, sha256) values ('uploaded', 'x.pdf', 'orphan/x.pdf', $1)`,
+        [HASH],
+      ),
+    ).toMatch(/documents_belongs_to_record/);
+    expect(await attempt(`insert into notes (body) values ('orphan')`)).toMatch(/notes_belongs_to_record/);
+  });
+
+  it("checks folders, kinds, candidate statuses and agreement statuses", async () => {
+    await asPostgres();
+    expect(
+      await attempt(
+        `insert into documents (candidate_id, kind, folder, file_name, storage_path, sha256) values ($1, 'uploaded', 'junk', 'x', 'p/y', $2)`,
+        [candidateId, HASH],
+      ),
+    ).toMatch(/check constraint/i);
+    expect(
+      await attempt(
+        `insert into documents (candidate_id, kind, folder, file_name, storage_path, sha256) values ($1, 'contract', 'other', 'x', 'p/z', $2)`,
+        [candidateId, HASH],
+      ),
+    ).toMatch(/check constraint/i);
+    expect(await attempt(`update candidates set status = 'hot' where id = $1`, [candidateId])).toMatch(/check constraint/i);
+    expect(await attempt(`update candidate_agreements set status = 'fully executed'`)).toMatch(/check constraint/i);
+  });
+
+  it("hides candidates and their agreements from non-owners", async () => {
+    await asRole("authenticated", STRANGER_ID);
+    for (const table of ["candidates", "candidate_agreements"]) {
+      const { rows } = await db.query(`select * from ${table}`);
+      expect(rows, table).toHaveLength(0);
+    }
+    const write = await attempt(`insert into candidates (full_name) values ('Sneaky')`);
+    await asPostgres();
+    expect(write).toMatch(/row-level security/i);
   });
 });
 

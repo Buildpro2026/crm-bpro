@@ -108,10 +108,10 @@ describe("signing status", () => {
 describe("redirects after sign-in", () => {
   it("accepts same-site paths only", () => {
     expect(safeNextPath("/companies/123")).toBe("/companies/123");
-    expect(safeNextPath("https://evil.example")).toBe("/companies");
-    expect(safeNextPath("//evil.example")).toBe("/companies");
-    expect(safeNextPath("/\\evil.example")).toBe("/companies");
-    expect(safeNextPath(undefined)).toBe("/companies");
+    expect(safeNextPath("https://evil.example")).toBe("/dashboard");
+    expect(safeNextPath("//evil.example")).toBe("/dashboard");
+    expect(safeNextPath("/\\evil.example")).toBe("/dashboard");
+    expect(safeNextPath(undefined)).toBe("/dashboard");
   });
 });
 

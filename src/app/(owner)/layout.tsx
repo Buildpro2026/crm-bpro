@@ -1,6 +1,15 @@
 import Link from "next/link";
 import { requireOwner } from "@/lib/owner";
 
+const NAV = [
+  { href: "/dashboard", label: "Dashboard" },
+  { href: "/companies", label: "Companies" },
+  { href: "/contacts", label: "Contacts" },
+  { href: "/candidates", label: "Candidates" },
+  { href: "/deals", label: "Deals" },
+  { href: "/tasks", label: "Tasks" },
+] as const;
+
 export default async function OwnerLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   const owner = await requireOwner();
   return (
@@ -8,13 +17,15 @@ export default async function OwnerLayout({ children }: Readonly<{ children: Rea
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
           <div className="flex items-center gap-6">
-            <Link href="/companies" className="text-sm font-semibold tracking-wide text-sky-900">
+            <Link href="/dashboard" className="text-sm font-semibold tracking-wide text-sky-900">
               BUILDPRO CRM
             </Link>
-            <nav className="flex gap-4 text-sm text-slate-600">
-              <Link href="/companies" className="hover:text-slate-900">
-                Companies
-              </Link>
+            <nav className="flex flex-wrap gap-4 text-sm text-slate-600">
+              {NAV.map((item) => (
+                <Link key={item.href} href={item.href} className="hover:text-slate-900">
+                  {item.label}
+                </Link>
+              ))}
             </nav>
           </div>
           <div className="flex items-center gap-4 text-sm text-slate-600">

@@ -2,11 +2,20 @@
 
 Private recruiting CRM for BuildPro Recruiters, LLC. Owner: Lee Chandler.
 
-**This is Milestone 1 only:** owner login, company and contact records, document storage, and the client
-signing flow. A client signs the Client Representation Agreement and completes the Client Search Information
-Form online. The fully executed PDF is filed back to the company record, with a complete audit trail.
+**Built so far: Milestones 1 and 2.**
 
-Milestones 2 to 5 (CRM pipeline, recruiting pipeline, email and automations, reporting) are not built.
+- **Milestone 1:** owner login, company and contact records, document storage, and the client signing flow. A
+  client signs the Client Representation Agreement and completes the Client Search Information Form online. The
+  fully executed PDF is filed back to the company record, with a complete audit trail.
+- **Milestone 2 (CRM core):** a dashboard, company status and search, a contacts directory, a deals pipeline board
+  with drag-and-drop stages, and notes and tasks on companies and deals. See [Milestone 2](#milestone-2-crm-core).
+
+- **Candidates and files (start of Milestone 3):** candidate records, Zoho-style file folders on every company and
+  candidate, an auto-filled "About BuildPro Recruiters" PDF for clients, and an online Candidate Representation
+  Agreement that pre-fills the candidate's details. See [Candidates and files](#candidates-and-files).
+
+Still to build: jobs, submissions, interviews, offers and placements (rest of Milestone 3), email and automations
+(Milestone 4), and reporting (Milestone 5).
 
 ## Stack
 
@@ -23,9 +32,12 @@ Next.js 16 uses `src/proxy.ts` for the request gate (it replaces `middleware.ts`
 
 Project ref `lnozoziidyljwdarzvgp`. The project starts empty, and the migration in this repo creates everything.
 
-1. **Apply the migration.** In the Supabase dashboard, open SQL Editor, paste the contents of
+1. **Apply the migrations, in order.** In the Supabase dashboard, open SQL Editor, paste the contents of
    [`supabase/migrations/0001_milestone1_foundation.sql`](supabase/migrations/0001_milestone1_foundation.sql), and
-   run it. With the Supabase CLI instead: link the project, then `supabase db push`.
+   run it. Then do the same with
+   [`supabase/migrations/0002_milestone2_crm_core.sql`](supabase/migrations/0002_milestone2_crm_core.sql), then
+   [`supabase/migrations/0003_candidates_and_files.sql`](supabase/migrations/0003_candidates_and_files.sql). Run each
+   file once only. With the Supabase CLI instead: link the project, then `supabase db push`.
 2. **Turn off public sign-ups.** Authentication > Sign In / Providers > Email: disable "Allow new users to sign up".
    The database is already safe without this (a signed-in user with no owner profile can read nothing), but this
    removes the option entirely.
@@ -151,9 +163,83 @@ Additions beyond the brief, all additive: `signature_requests.form_answers` (the
 signature and countersignature columns, `documents.signature_request_id` and `documents.size_bytes`, and
 `audit_log.created_at` (with no `updated_at`, because audit rows never change).
 
+## Milestone 2: CRM core
+
+Migration `0002_milestone2_crm_core.sql` is additive. It adds:
+
+| Table or column | Purpose |
+| --- | --- |
+| `companies.status` | `prospect` (default), `active client`, `past client`, `inactive` |
+| `companies.phone`, `companies.source` | Main phone and lead source |
+| `deals` | One business development opportunity per row: company, main contact, stage, position, openings, estimated fee, fee percentage, expected close date, lost reason. `closed_at` is set by a trigger when the stage becomes Won or Lost and cleared if the deal is reopened. |
+| `notes` | Timeline entries on a company, optionally tied to a contact or deal |
+| `tasks` | To-dos with a due date and priority, standalone or linked to a company, contact or deal. `completed_at` is set by a trigger. |
+
+Deal stages, in order: New lead, Contacted, Discovery meeting, Proposal sent, Agreement sent, Won, Lost. They are
+fixed by a check constraint and mirrored in [`src/lib/crm.ts`](src/lib/crm.ts). Changing them takes a new migration.
+
+A trigger keeps links consistent: a contact or deal linked to a deal, note or task must belong to the same company,
+and a task linked only to a deal or contact gets that company filled in. All three new tables are owner-only under
+row level security. Creating deals, moving stages, adding or deleting notes and tasks, and completing tasks are
+written to `audit_log`.
+
+### Pages
+
+- `/dashboard`: open pipeline value, deals won this month, tasks overdue and due today, pipeline by stage, recent
+  activity. Sign-in now lands here.
+- `/companies`: search by name, industry or city, and filter by status. A company page now shows its deals, open
+  tasks, and notes, alongside the Milestone 1 signing packet.
+- `/contacts`: every contact across companies, with search.
+- `/deals`: the pipeline board. Drag a card between columns, or use the stage picker on the card. `/deals/<id>`
+  shows the deal's facts, tasks, notes, and activity.
+- `/tasks`: open tasks grouped into Overdue, Due today, Next 7 days, Later, and No due date, plus a Completed view.
+
+### Milestone 2 acceptance checks
+
+1. Apply `0002`. The companies list loads, and existing companies show the status Prospect.
+2. Edit a company: set status Active client, a phone and a source. The list and company page show them.
+3. From the company page, click New deal. Save it with a contact from that company.
+4. On `/deals`, drag the card to Proposal sent. Refresh: it stays there. The deal page activity shows the move.
+5. Move the deal to Won. The dashboard's "Won this month" includes it.
+6. Add a note and a task (due today) on the deal. Both show on the deal and the company page, and the task shows
+   on the dashboard and under Due today on `/tasks`.
+7. Tick the task. It moves to the Completed view.
+8. Try a deal whose main contact works at a different company. It must be refused.
+
+## Candidates and files
+
+Migration `0003_candidates_and_files.sql` is additive. It adds `candidates`, `candidate_agreements`, a `folder` and
+`candidate_id` on `documents`, `candidate_id` on `notes`, `tasks` and `audit_log`, and widens `documents.kind` to
+include `generated` and `signed agreement`. A file or note must belong to a company or a candidate.
+
+- **Folders.** Company folders: Client packet, Agreements, Search forms, Job descriptions, Invoices, Correspondence,
+  Other. Candidate folders: Resumes, Agreements, Applications, References, Offer letters, Correspondence, Other.
+  Uploads accept PDF, Word, Excel, CSV, text, RTF and images up to 10 MB. The content type comes from the file
+  extension, the name is cleaned, and each file's SHA-256 is checked on every download. Only hand-uploaded files
+  can be deleted; signed and generated documents stay.
+- **Auto-filled client document.** On a company page, "Auto-fill About BuildPro Recruiters PDF" writes the About
+  page from BuildPro's template, prepared for that company, into the Client packet folder. The agreement and search
+  form remain the online signing packet from Milestone 1, and file themselves into Agreements.
+- **Candidate agreement.** On a candidate page, "Create candidate agreement link" makes a one-time 14-day link
+  (`/sign/candidate/<token>`, only the hash is stored) and a message to send. The candidate sees their name, email,
+  phone, city, title and LinkedIn already filled in, adds recent submissions, chooses whether texts are allowed,
+  ticks consent, and types their name (it must match). On signing, the PDF (agreement text, details, signature
+  certificate with IP and browser) is filed in the candidate's Agreements folder, the record is updated with what
+  they confirmed, and a New or Screening candidate becomes Active. The candidate can download their copy from the
+  same link. The agreement text is verbatim from BuildPro's candidate form, in `src/lib/candidate-agreement.ts`.
+
+### Candidate acceptance checks
+
+1. Apply `0003`. `/candidates` loads.
+2. Add a candidate with a phone and city. Upload a resume into Resumes. Download it.
+3. Create the agreement link, open it in a private window, and check the details are pre-filled.
+4. Try to sign with a different typed name: it must refuse. Sign properly.
+5. The candidate page shows Agreement signed, status Active, and the signed PDF in Agreements.
+6. On a company page, auto-fill the About PDF and open it from Client packet.
+
 ## Extending in later milestones
 
-- Add new migrations (`0002_...sql` and so on). Do not edit `0001` once it has been applied anywhere.
+- Add new migrations (`0004_...sql` and so on). Do not edit `0001` to `0003` once applied anywhere.
 - To change the agreement or the form, add a new `TEMPLATE_VERSION` or `INTAKE_FORM_VERSION`. Each request records
   the versions it was signed against, so old packets keep their wording.
 - Candidates, jobs, deals and placements will reference `companies` and `contacts`. The foreign keys and RLS

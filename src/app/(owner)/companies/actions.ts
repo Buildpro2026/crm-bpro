@@ -15,6 +15,20 @@ import {
 
 const orNull = (value: string) => (value ? value : null);
 
+function companyColumns(values: Record<string, string>) {
+  return {
+    name: values.name,
+    status: values.status || "prospect",
+    industry: orNull(values.industry),
+    phone: orNull(values.phone),
+    website: orNull(values.website),
+    hq_city: orNull(values.hq_city),
+    hq_state: orNull(values.hq_state),
+    source: orNull(values.source),
+    notes: orNull(values.notes),
+  };
+}
+
 export async function createCompanyAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const owner = await requireOwner();
   const values = readStrings(formData, COMPANY_FIELD_NAMES);
@@ -26,12 +40,7 @@ export async function createCompanyAction(_prev: FormState, formData: FormData):
   const { data, error } = await owner.supabase
     .from("companies")
     .insert({
-      name: values.name,
-      industry: orNull(values.industry),
-      website: orNull(values.website),
-      hq_city: orNull(values.hq_city),
-      hq_state: orNull(values.hq_state),
-      notes: orNull(values.notes),
+      ...companyColumns(values),
       created_by: owner.profile.id,
     })
     .select("id")
@@ -63,14 +72,7 @@ export async function updateCompanyAction(_prev: FormState, formData: FormData):
 
   const { data, error } = await owner.supabase
     .from("companies")
-    .update({
-      name: values.name,
-      industry: orNull(values.industry),
-      website: orNull(values.website),
-      hq_city: orNull(values.hq_city),
-      hq_state: orNull(values.hq_state),
-      notes: orNull(values.notes),
-    })
+    .update(companyColumns(values))
     .eq("id", id)
     .select("id")
     .maybeSingle();

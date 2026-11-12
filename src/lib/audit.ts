@@ -18,13 +18,36 @@ export type AuditAction =
   | "pdf_generated"
   | "countersigned"
   | "document_downloaded"
-  | "executed_copy_downloaded";
+  | "executed_copy_downloaded"
+  // Milestone 2
+  | "deal_created"
+  | "deal_updated"
+  | "deal_stage_changed"
+  | "note_added"
+  | "note_deleted"
+  | "task_created"
+  | "task_completed"
+  | "task_reopened"
+  | "task_deleted"
+  // Candidates and files
+  | "candidate_created"
+  | "candidate_updated"
+  | "file_uploaded"
+  | "file_deleted"
+  | "document_generated"
+  | "candidate_link_created"
+  | "candidate_link_revoked"
+  | "candidate_page_viewed"
+  | "candidate_link_denied"
+  | "candidate_signed"
+  | "candidate_copy_downloaded";
 
 export type AuditEntry = {
   actor: string; // 'owner:<uuid>' | 'client' | 'system'
   action: AuditAction;
   companyId?: string | null;
   signatureRequestId?: string | null;
+  candidateId?: string | null;
   detail?: Record<string, unknown>;
   ipAddress?: string | null;
   userAgent?: string | null;
@@ -37,6 +60,9 @@ export async function writeAudit(client: SupabaseClient, entry: AuditEntry): Pro
     action: entry.action,
     company_id: entry.companyId ?? null,
     signature_request_id: entry.signatureRequestId ?? null,
+    // Only sent when set, so audit writes keep working on a database that has
+    // not yet applied migration 0003.
+    ...(entry.candidateId ? { candidate_id: entry.candidateId } : {}),
     detail: entry.detail ?? {},
     ip_address: entry.ipAddress ?? null,
     user_agent: entry.userAgent ?? null,

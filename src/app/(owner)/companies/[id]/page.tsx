@@ -13,6 +13,15 @@ import {
 import { NewSignatureRequest } from "@/components/signature-request-panel";
 import { RequestActionButton } from "@/components/request-action-button";
 import { AutoRefresh } from "@/components/auto-refresh";
+import { CompanyStatusBadge, StageBadge } from "@/components/crm/badges";
+import { NoteComposer } from "@/components/crm/note-composer";
+import { NotesTimeline } from "@/components/crm/notes-timeline";
+import { TaskQuickAdd } from "@/components/crm/task-quick-add";
+import { TaskList } from "@/components/crm/task-list";
+import { formatIsoDate, formatUsd } from "@/lib/crm";
+import { COMPANY_FOLDERS } from "@/lib/files";
+import { FilesPanel } from "@/components/crm/files-panel";
+import { generateAboutBuildProAction } from "../../file-actions";
 import {
   countersignSignatureRequestAction,
   revokeSignatureRequestAction,
@@ -28,13 +37,33 @@ export default async function CompanyPage({ params }: { params: Promise<{ id: st
   const { data: company } = await supabase.from("companies").select("*").eq("id", id).maybeSingle();
   if (!company) notFound();
 
-  const [contactsRes, documentsRes, requestsRes, auditRes] = await Promise.all([
+  const [contactsRes, documentsRes, requestsRes, auditRes, dealsRes, notesRes, tasksRes] = await Promise.all([
     supabase.from("contacts").select("*").eq("company_id", id).order("name"),
     supabase.from("documents").select("*").eq("company_id", id).order("created_at", { ascending: false }),
     supabase.from("signature_requests").select("*").eq("company_id", id).order("created_at", { ascending: false }),
     supabase.from("audit_log").select("*").eq("company_id", id).order("created_at", { ascending: true }).limit(1000),
+    supabase
+      .from("deals")
+      .select("id, name, stage, estimated_value, expected_close_date, position_title")
+      .eq("company_id", id)
+      .order("updated_at", { ascending: false }),
+    supabase
+      .from("notes")
+      .select("id, body, created_at, deal_id, contact_id")
+      .eq("company_id", id)
+      .order("created_at", { ascending: false })
+      .limit(200),
+    supabase
+      .from("tasks")
+      .select("id, title, details, due_date, priority, status, company_id, deal_id")
+      .eq("company_id", id)
+      .eq("status", "open")
+      .order("due_date", { ascending: true, nullsFirst: false }),
   ]);
 
+  const deals = dealsRes.data ?? [];
+  const dealNames = new Map(deals.map((d) => [d.id as string, d.name as string]));
+  const returnPath = `/companies/${id}`;
   const contacts = contactsRes.data ?? [];
   const documents = documentsRes.data ?? [];
   const requests = requestsRes.data ?? [];
@@ -65,28 +94,101 @@ export default async function CompanyPage({ params }: { params: Promise<{ id: st
           <Link href="/companies" className="text-sm text-slate-600 hover:text-slate-900">
             All companies
           </Link>
-          <h1 className="mt-2 text-2xl font-semibold text-slate-900">{company.name}</h1>
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <h1 className="text-2xl font-semibold text-slate-900">{company.name}</h1>
+            <CompanyStatusBadge status={company.status} />
+          </div>
           <p className="text-sm text-slate-600">
             {[company.industry, [company.hq_city, company.hq_state].filter(Boolean).join(", ")]
               .filter(Boolean)
               .join("  |  ") || "No industry or location yet"}
           </p>
-          {company.website ? <p className="text-sm text-sky-900">{company.website}</p> : null}
+          <p className="flex flex-wrap gap-x-4 text-sm">
+            {company.phone ? (
+              <a href={`tel:${company.phone}`} className="text-sky-900 hover:underline">
+                {company.phone}
+              </a>
+            ) : null}
+            {company.website ? <span className="text-sky-900">{company.website}</span> : null}
+            {company.source ? <span className="text-slate-500">Source: {company.source}</span> : null}
+          </p>
         </div>
-        <Link
-          href={`/companies/${id}/edit`}
-          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-100"
-        >
-          Edit company
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href={`/deals/new?company=${id}`}
+            className="rounded-md bg-sky-800 px-3 py-1.5 text-sm font-semibold text-white hover:bg-sky-900"
+          >
+            New deal
+          </Link>
+          <Link
+            href={`/companies/${id}/edit`}
+            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-100"
+          >
+            Edit company
+          </Link>
+        </div>
       </div>
 
       {company.notes ? (
         <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600">Notes</h2>
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-600">Background</h2>
           <p className="mt-2 whitespace-pre-wrap text-sm text-slate-800">{company.notes}</p>
         </section>
       ) : null}
+
+      {/* Deals */}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-slate-900">Deals</h2>
+          <Link href={`/deals/new?company=${id}`} className="text-sm text-sky-900 hover:underline">
+            Add deal
+          </Link>
+        </div>
+        {deals.length === 0 ? (
+          <p className="text-sm text-slate-600">No deals yet.</p>
+        ) : (
+          <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white shadow-sm">
+            {deals.map((d) => (
+              <li key={d.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm">
+                <div>
+                  <Link href={`/deals/${d.id}`} className="font-medium text-sky-900 hover:underline">
+                    {d.name}
+                  </Link>
+                  <p className="text-slate-600">
+                    {[d.position_title, formatUsd(d.estimated_value), d.expected_close_date ? `Close ${formatIsoDate(d.expected_close_date)}` : ""]
+                      .filter(Boolean)
+                      .join("  |  ") || "No details"}
+                  </p>
+                </div>
+                <StageBadge stage={d.stage} />
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* Tasks and notes */}
+      <div className="grid gap-8 lg:grid-cols-2">
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold text-slate-900">Open tasks</h2>
+          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <TaskQuickAdd companyId={id} returnPath={returnPath} />
+          </div>
+          <TaskList tasks={tasksRes.data ?? []} returnPath={returnPath} dealNames={dealNames} emptyText="No open tasks." />
+        </section>
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold text-slate-900">Notes</h2>
+          <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <NoteComposer companyId={id} returnPath={returnPath} />
+          </div>
+          <NotesTimeline
+            notes={notesRes.data ?? []}
+            returnPath={returnPath}
+            dealNames={dealNames}
+            contactNames={new Map(contacts.map((c) => [c.id as string, c.name as string]))}
+          />
+        </section>
+      </div>
 
       {/* Contacts */}
       <section className="space-y-3">
@@ -234,43 +336,23 @@ export default async function CompanyPage({ params }: { params: Promise<{ id: st
         )}
       </section>
 
-      {/* Documents */}
+      {/* Files */}
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold text-slate-900">Documents</h2>
-        {documents.length === 0 ? (
-          <p className="text-sm text-slate-600">No documents yet.</p>
-        ) : (
-          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
-            <table className="min-w-full divide-y divide-slate-200 text-sm">
-              <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
-                <tr>
-                  <th className="px-4 py-3">File</th>
-                  <th className="px-4 py-3">Kind</th>
-                  <th className="px-4 py-3">Created (Central)</th>
-                  <th className="px-4 py-3">SHA-256</th>
-                  <th className="px-4 py-3"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {documents.map((d) => (
-                  <tr key={d.id}>
-                    <td className="px-4 py-3 text-slate-900">{d.file_name}</td>
-                    <td className="px-4 py-3 capitalize text-slate-600">{d.kind}</td>
-                    <td className="px-4 py-3 text-slate-600">{formatCentralDateTime(d.created_at)}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-slate-500" title={d.sha256}>
-                      {d.sha256.slice(0, 16)}...
-                    </td>
-                    <td className="px-4 py-3">
-                      <a href={`/documents/${d.id}`} className="text-sky-900 hover:underline">
-                        Download
-                      </a>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Files</h2>
+            <p className="text-sm text-slate-600">
+              Signed agreements file themselves here automatically. Upload anything else into a folder.
+            </p>
           </div>
-        )}
+          <form action={generateAboutBuildProAction}>
+            <input type="hidden" name="company_id" value={id} />
+            <button type="submit" className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-slate-100">
+              Auto-fill &ldquo;About BuildPro Recruiters&rdquo; PDF
+            </button>
+          </form>
+        </div>
+        <FilesPanel files={documents} folders={COMPANY_FOLDERS} companyId={id} />
       </section>
     </div>
   );
