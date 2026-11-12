@@ -6,8 +6,32 @@ import { safeNextPath } from "@/lib/safe-redirect";
 import { buildSigningEmail } from "@/lib/signing/email-text";
 import { validateCompanyInput, validateContactInput, isUuid } from "@/lib/records";
 import { formatCentralDateTime, addDays } from "@/lib/time";
-import { decodeDrawnSignature } from "@/lib/signing/service";
+import { buildIntakePrefill, decodeDrawnSignature } from "@/lib/signing/service";
 import { AGREEMENT_PARAGRAPHS, AGREEMENT_TITLE, TEMPLATE_VERSION } from "@/lib/agreement";
+
+describe("client form pre-fill", () => {
+  it("fills the search form from the company, contact and open deal, and skips blanks", () => {
+    const prefill = buildIntakePrefill(
+      { name: "Hanover Signature Homes", industry: "Homebuilding", website: null, hq_city: "Dallas", hq_state: "TX" },
+      { name: "Kathryn Leblanc", title: "Executive Assistant", email: "k@example.com", phone: "214-555-0100" },
+      { position_title: "Project Coordinator", positions_count: 2 },
+    );
+    expect(prefill).toEqual({
+      company_name: "Hanover Signature Homes",
+      industry: "Homebuilding",
+      hq_city_state: "Dallas, TX",
+      contact_name: "Kathryn Leblanc",
+      contact_title: "Executive Assistant",
+      contact_email: "k@example.com",
+      contact_phone: "214-555-0100",
+      position_title: "Project Coordinator",
+      number_of_openings: "2",
+    });
+    const keys = new Set(INTAKE_FIELDS.map((f) => f.key));
+    for (const key of Object.keys(prefill)) expect(keys.has(key), key).toBe(true);
+    expect(buildIntakePrefill(null, null, null)).toEqual({});
+  });
+});
 
 function fullAnswers(): Record<string, string> {
   const out: Record<string, string> = {};

@@ -276,7 +276,14 @@ export async function countersignSigningRequest(
 // ---------------------------------------------------------------------------
 
 export type LinkState =
-  | { open: true; request: RequestRow; companyName: string; contactName: string; contactEmail: string | null }
+  | {
+      open: true;
+      request: RequestRow;
+      companyName: string;
+      contactName: string;
+      contactEmail: string | null;
+      prefill: Record<string, string>;
+    }
   | { open: false; reason: "not_found" | "revoked" | "expired" };
 
 const TOKEN_SHAPE = /^[A-Za-z0-9_-]{43}$/;
@@ -325,9 +332,18 @@ export async function resolveSigningLink(token: string, ctx: RequestContext): Pr
     return { open: false, reason: "expired" };
   }
 
-  const [{ data: company }, { data: contact }] = await Promise.all([
-    admin.from("companies").select("name").eq("id", row.company_id).single(),
-    admin.from("contacts").select("name, email").eq("id", row.contact_id).single(),
+  const [{ data: company }, { data: contact }, { data: deal }] = await Promise.all([
+    admin.from("companies").select("*").eq("id", row.company_id).single(),
+    admin.from("contacts").select("*").eq("id", row.contact_id).single(),
+    // The company's most recently updated open deal, if deals exist yet.
+    admin
+      .from("deals")
+      .select("position_title, positions_count")
+      .eq("company_id", row.company_id)
+      .not("stage", "in", "(won,lost)")
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
   ]);
   return {
     open: true,
@@ -335,7 +351,30 @@ export async function resolveSigningLink(token: string, ctx: RequestContext): Pr
     companyName: company?.name ?? "",
     contactName: contact?.name ?? "",
     contactEmail: contact?.email ?? null,
+    prefill: buildIntakePrefill(company, contact, deal),
   };
+}
+
+type Row = Record<string, unknown> | null | undefined;
+const str = (v: unknown) => (typeof v === "string" ? v : typeof v === "number" ? String(v) : "");
+
+// Maps what BuildPro already knows onto the Client Search Information Form,
+// so the client only confirms it instead of typing it again.
+export function buildIntakePrefill(company: Row, contact: Row, deal: Row): Record<string, string> {
+  const out: Record<string, string> = {
+    company_name: str(company?.name),
+    industry: str(company?.industry),
+    company_website: str(company?.website),
+    hq_city_state: [str(company?.hq_city), str(company?.hq_state)].filter(Boolean).join(", "),
+    contact_name: str(contact?.name),
+    contact_title: str(contact?.title),
+    contact_email: str(contact?.email),
+    contact_phone: str(contact?.phone),
+    position_title: str(deal?.position_title),
+    number_of_openings: str(deal?.positions_count),
+  };
+  for (const key of Object.keys(out)) if (!out[key]) delete out[key];
+  return out;
 }
 
 async function denyAccess(row: RequestRow, reason: "revoked" | "expired", ctx: RequestContext) {

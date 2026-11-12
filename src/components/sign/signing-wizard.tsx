@@ -22,6 +22,9 @@ type Props = {
   agreementParagraphs: string[];
   sections: Array<{ title: string; fields: FieldDef[] }>;
   savedAnswers: IntakeAnswers | null;
+  // Details BuildPro already has (company, contact, open deal), used for any
+  // field the client has not saved yet.
+  prefill?: Record<string, string>;
 };
 
 type Step = 1 | 2 | 3;
@@ -41,13 +44,18 @@ export function SigningWizard(props: Props) {
     if (!initial.company_name) initial.company_name = companyName;
     if (!initial.contact_name) initial.contact_name = props.contactName;
     if (!initial.contact_email) initial.contact_email = props.contactEmail;
+    for (const [key, value] of Object.entries(props.prefill ?? {})) {
+      if (key in initial && !initial[key] && value) initial[key] = value;
+    }
     return initial;
   });
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
 
   const [signerName, setSignerName] = useState(props.contactName);
-  const [signerTitle, setSignerTitle] = useState(props.savedAnswers?.contact_title ?? "");
+  const [signerTitle, setSignerTitle] = useState(
+    props.savedAnswers?.contact_title || props.prefill?.contact_title || "",
+  );
   const [signerEmail, setSignerEmail] = useState(props.contactEmail);
   const [consent, setConsent] = useState(false);
   const [method, setMethod] = useState<"drawn" | "typed">("drawn");

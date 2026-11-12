@@ -74,6 +74,7 @@ export default async function SignPage({ params }: { params: Promise<{ token: st
         })),
       }))}
       savedAnswers={row.form_answers}
+      prefill={link.prefill}
     />
   );
 }
