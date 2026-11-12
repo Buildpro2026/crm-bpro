@@ -23,6 +23,11 @@ const MIGRATION_3 = readFileSync(
   "utf8",
 );
 
+const MIGRATION_4 = readFileSync(
+  fileURLToPath(new URL("../supabase/migrations/0004_agent_api_keys.sql", import.meta.url)),
+  "utf8",
+);
+
 const OWNER_ID = "11111111-1111-4111-8111-111111111111";
 const STRANGER_ID = "22222222-2222-4222-8222-222222222222";
 const HASH = "a".repeat(64);
@@ -81,6 +86,7 @@ beforeAll(async () => {
   await db.exec(MIGRATION);
   await db.exec(MIGRATION_2);
   await db.exec(MIGRATION_3);
+  await db.exec(MIGRATION_4);
   await db.exec(`grant select, insert, update, delete on all tables in schema public to authenticated`);
   await db.exec(`grant execute on all functions in schema public to authenticated`);
   await db.exec(`grant all on all tables in schema public to service_role`);
@@ -403,6 +409,18 @@ describe("candidates, files and candidate agreements", () => {
     const write = await attempt(`insert into candidates (full_name) values ('Sneaky')`);
     await asPostgres();
     expect(write).toMatch(/row-level security/i);
+  });
+});
+
+describe("agent API keys table", () => {
+  it("stores only hashes and hides keys from non-owners", async () => {
+    await asRole("authenticated", OWNER_ID);
+    expect(await attempt(`insert into api_keys (name, key_prefix, key_hash) values ('Chad', 'bpcrm_abc', $1)`, ["f".repeat(64)])).toBeNull();
+    expect(await attempt(`insert into api_keys (name, key_prefix, key_hash) values ('Bad', 'x', 'plaintext-key')`)).toMatch(/check constraint/i);
+    await asRole("authenticated", STRANGER_ID);
+    const { rows } = await db.query(`select * from api_keys`);
+    await asPostgres();
+    expect(rows).toHaveLength(0);
   });
 });
 

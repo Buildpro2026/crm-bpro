@@ -8,6 +8,7 @@ const NAV = [
   { href: "/candidates", label: "Candidates" },
   { href: "/deals", label: "Deals" },
   { href: "/tasks", label: "Tasks" },
+  { href: "/settings/api-keys", label: "API keys" },
 ] as const;
 
 export default async function OwnerLayout({ children }: Readonly<{ children: React.ReactNode }>) {

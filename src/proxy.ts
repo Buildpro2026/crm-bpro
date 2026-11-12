@@ -9,7 +9,8 @@ import { NextResponse, type NextRequest } from "next/server";
 // Public paths: the sign-in page, the client signing pages (they check their
 // own tokens), the logout route, and static assets.
 
-const PUBLIC_PREFIXES = ["/login", "/sign/", "/logout"];
+// /api/agent/ checks its own API key on every request.
+const PUBLIC_PREFIXES = ["/login", "/sign/", "/logout", "/api/agent/"];
 
 function isPublic(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((prefix) => pathname === prefix.replace(/\/$/, "") || pathname.startsWith(prefix));

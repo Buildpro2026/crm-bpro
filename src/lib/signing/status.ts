@@ -72,6 +72,8 @@ const ACTION_LABELS: Record<string, string> = {
   candidate_link_denied: "Candidate link used after it closed",
   candidate_signed: "Candidate signed the agreement",
   candidate_copy_downloaded: "Candidate downloaded their signed copy",
+  api_key_created: "Agent API key created",
+  api_key_revoked: "Agent API key revoked",
 };
 
 export function actionLabel(action: string): string {

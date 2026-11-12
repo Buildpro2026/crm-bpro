@@ -36,7 +36,8 @@ Project ref `lnozoziidyljwdarzvgp`. The project starts empty, and the migration 
    [`supabase/migrations/0001_milestone1_foundation.sql`](supabase/migrations/0001_milestone1_foundation.sql), and
    run it. Then do the same with
    [`supabase/migrations/0002_milestone2_crm_core.sql`](supabase/migrations/0002_milestone2_crm_core.sql), then
-   [`supabase/migrations/0003_candidates_and_files.sql`](supabase/migrations/0003_candidates_and_files.sql). Run each
+   [`supabase/migrations/0003_candidates_and_files.sql`](supabase/migrations/0003_candidates_and_files.sql), then
+   [`supabase/migrations/0004_agent_api_keys.sql`](supabase/migrations/0004_agent_api_keys.sql). Run each
    file once only. With the Supabase CLI instead: link the project, then `supabase db push`.
 2. **Turn off public sign-ups.** Authentication > Sign In / Providers > Email: disable "Allow new users to sign up".
    The database is already safe without this (a signed-in user with no owner profile can read nothing), but this
@@ -237,9 +238,21 @@ include `generated` and `signed agreement`. A file or note must belong to a comp
 5. The candidate page shows Agreement signed, status Active, and the signed PDF in Agreements.
 6. On a company page, auto-fill the About PDF and open it from Client packet.
 
+## Agent API (replaces HubSpot for Chad and Muse)
+
+Migration `0004_agent_api_keys.sql` adds `api_keys`. Lee creates one key per agent on **API keys**
+(`/settings/api-keys`); only a hash is stored and the key is shown once. Agents call
+`/api/agent/v1/...` with `Authorization: Bearer bpcrm_...`. Endpoints, fields, and the HubSpot-to-CRM mapping
+for Chad are in [`docs/AGENT_API.md`](docs/AGENT_API.md). Agents cannot delete anything, and every write is in the
+audit log as `agent:<key name>`. The CRM must be deployed (Vercel) before agents on Render can reach it.
+
+The HubSpot records Lee approved (14 candidates with their notes, 39 prospect companies, and Cahill Builders with
+Robert Cahill) were imported on 2026-11-12 with a one-time script; each imported record says so in its background
+or notes.
+
 ## Extending in later milestones
 
-- Add new migrations (`0004_...sql` and so on). Do not edit `0001` to `0003` once applied anywhere.
+- Add new migrations (`0005_...sql` and so on). Do not edit `0001` to `0004` once applied anywhere.
 - To change the agreement or the form, add a new `TEMPLATE_VERSION` or `INTAKE_FORM_VERSION`. Each request records
   the versions it was signed against, so old packets keep their wording.
 - Candidates, jobs, deals and placements will reference `companies` and `contacts`. The foreign keys and RLS

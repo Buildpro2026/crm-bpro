@@ -40,7 +40,10 @@ export type AuditAction =
   | "candidate_page_viewed"
   | "candidate_link_denied"
   | "candidate_signed"
-  | "candidate_copy_downloaded";
+  | "candidate_copy_downloaded"
+  // Agent API
+  | "api_key_created"
+  | "api_key_revoked";
 
 export type AuditEntry = {
   actor: string; // 'owner:<uuid>' | 'client' | 'system'
