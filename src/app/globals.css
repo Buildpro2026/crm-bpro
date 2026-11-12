@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+/* Tailwind does the work. The only global rules here keep long text from
+   breaking phone layouts and let signature canvases ignore touch scrolling. */
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  overflow-wrap: anywhere;
+}
+
+.signature-pad {
+  touch-action: none;
+}
