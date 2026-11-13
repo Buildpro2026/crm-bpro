@@ -21,7 +21,8 @@ deals.
 | --- | --- |
 | `GET /health` | Check the key works. Returns `{ ok, agent }`. |
 | `GET /people?email=` | Find candidates and company contacts with that email. Replaces HubSpot contact search. |
-| `GET /candidates?q=&status=&limit=` | Search candidates (name, email, phone, title). |
+| `GET /stats` | Totals and records added in the last 7 days, for candidates, contacts, companies and deals. |
+| `GET /candidates?q=&status=&since=&limit=` | Search candidates (name, email, phone, title). `since` is an ISO date-time. |
 | `POST /candidates` | Create a candidate. If one with the same email exists, returns it with `created: false`. |
 | `GET /candidates/{id}` | A candidate with recent notes, tasks and file names. |
 | `PATCH /candidates/{id}` | Update only the fields sent. |
@@ -29,9 +30,11 @@ deals.
 | `POST /companies` | Create a company. Same name returns the existing one with `created: false`. |
 | `GET /companies/{id}` | A company with contacts, deals and recent notes. |
 | `PATCH /companies/{id}` | Update only the fields sent. |
+| `GET /contacts?q=&since=&limit=` | Search company contacts. |
 | `POST /contacts` | Add a contact to `company_id`, or to `company_name` (created if new). |
 | `POST /notes` | Add a note. Body: `body` plus one or more of `candidate_id`, `company_id`, `contact_id`, `deal_id`. |
 | `POST /tasks` | Add a task: `title`, optional `details`, `due_date` (YYYY-MM-DD), `priority` (low, normal, high), and links as for notes. |
+| `GET /notes/{id}` | One note. |
 | `GET /deals?stage=&company_id=&limit=` | List deals. |
 | `GET /deals/{id}` | One deal. |
 | `PATCH /deals/{id}` | Update a deal, including `stage`. |

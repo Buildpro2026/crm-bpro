@@ -50,3 +50,15 @@ describe("agent API routing", () => {
     expect((await routeAgentRequest("GET", ["people"], ctx())).status).toBe(400);
   });
 });
+
+describe("agent API query checks", () => {
+  it("rejects a bad since date before querying", async () => {
+    const c = { ...ctx(), query: new URLSearchParams("since=not-a-date") };
+    // since is checked after the query is built, so give it a chainable stub that records nothing.
+    const chain: Record<string, unknown> = {};
+    for (const m of ["select", "order", "limit", "or", "eq", "gte"]) chain[m] = () => chain;
+    const db = { from: () => chain } as never;
+    expect((await routeAgentRequest("GET", ["candidates"], { ...c, db })).status).toBe(400);
+    expect((await routeAgentRequest("GET", ["contacts"], { ...c, db })).status).toBe(400);
+  });
+});

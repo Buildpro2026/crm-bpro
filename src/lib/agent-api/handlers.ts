@@ -32,6 +32,14 @@ function merged(row: Record<string, unknown>, patch: Record<string, unknown>, na
   return base;
 }
 
+// ?since=2026-11-12T00:00:00Z limits a list to records created at or after it.
+function sinceOf(q: URLSearchParams): string | null | false {
+  const raw = q.get("since");
+  if (!raw) return null;
+  const t = Date.parse(raw);
+  return Number.isNaN(t) ? false : new Date(t).toISOString();
+}
+
 const limitOf = (q: URLSearchParams) => Math.min(Math.max(Number(q.get("limit")) || 50, 1), 200);
 const term = (q: string) => q.replace(/[%,()*\\]/g, " ").trim().slice(0, 100);
 
@@ -70,8 +78,14 @@ export async function routeAgentRequest(method: string, segments: string[], ctx:
       return getCompany(ctx, id!);
     case "PATCH companies/:id":
       return updateCompany(ctx, id!);
+    case "GET contacts":
+      return listContacts(ctx);
     case "POST contacts":
       return createContact(ctx);
+    case "GET notes/:id":
+      return getNote(ctx, id!);
+    case "GET stats":
+      return stats(ctx);
     case "POST notes":
       return createNote(ctx);
     case "POST tasks":
@@ -118,6 +132,9 @@ async function listCandidates({ db, query }: Ctx): Promise<ApiResult> {
     if (!isCandidateStatus(status)) return fail(400, "Unknown status.");
     q = q.eq("status", status);
   }
+  const since = sinceOf(query);
+  if (since === false) return fail(400, "since must be an ISO date-time.");
+  if (since) q = q.gte("created_at", since);
   const { data, error } = await q;
   if (error) return fail(500, error.message);
   return ok({ candidates: data });
@@ -235,6 +252,45 @@ async function updateCompany({ db, agent, body }: Ctx, id: string): Promise<ApiR
   if (error) return fail(500, error.message);
   await writeAudit(db, { actor: agent.actor, action: "company_updated", companyId: id, detail: { via: "agent_api", fields: Object.keys(body) } });
   return ok({ company: data });
+}
+
+async function listContacts({ db, query }: Ctx): Promise<ApiResult> {
+  let q = db
+    .from("contacts")
+    .select("id, name, title, email, phone, company_id, created_at")
+    .order("created_at", { ascending: false })
+    .limit(limitOf(query));
+  const search = term(query.get("q") ?? "");
+  if (search) q = q.or(`name.ilike.%${search}%,email.ilike.%${search}%,title.ilike.%${search}%`);
+  const since = sinceOf(query);
+  if (since === false) return fail(400, "since must be an ISO date-time.");
+  if (since) q = q.gte("created_at", since);
+  const { data, error } = await q;
+  if (error) return fail(500, error.message);
+  return ok({ contacts: data });
+}
+
+async function getNote({ db }: Ctx, id: string): Promise<ApiResult> {
+  const { data } = await db.from("notes").select("*").eq("id", id).maybeSingle();
+  return data ? ok({ note: data }) : fail(404, "Note not found.");
+}
+
+// Counts for an agent's scorecard: totals and how many were added in the last 7 days.
+async function stats({ db }: Ctx): Promise<ApiResult> {
+  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const count = async (table: string, recent: boolean) => {
+    let q = db.from(table).select("id", { count: "exact", head: true });
+    if (recent) q = q.gte("created_at", weekAgo);
+    const { count: n, error } = await q;
+    return error ? null : n;
+  };
+  const tables = ["candidates", "contacts", "companies", "deals"] as const;
+  const out: Record<string, number | null> = {};
+  for (const t of tables) {
+    out[`${t}_total`] = await count(t, false);
+    out[`${t}_new_7d`] = await count(t, true);
+  }
+  return ok(out);
 }
 
 async function createContact({ db, agent, body }: Ctx): Promise<ApiResult> {
