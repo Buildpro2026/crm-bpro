@@ -56,3 +56,24 @@ describe("agent key check", () => {
     expect(calls).toBe(0);
   });
 });
+
+describe("secret handling (production 2026-11-18: a line break inside the Vercel service key)", () => {
+  it("strips whitespace pasted inside a key", async () => {
+    const { env } = await import("@/lib/env");
+    const old = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    process.env.SUPABASE_SERVICE_ROLE_KEY = " sb_secret_abc\nDEF \r\n";
+    try {
+      expect(env.serviceRoleKey).toBe("sb_secret_abcDEF");
+    } finally {
+      process.env.SUPABASE_SERVICE_ROLE_KEY = old;
+    }
+  });
+
+  it("redacts keys from error text, including a key split by a line break", async () => {
+    const { redactSecrets } = await import("@/lib/agent-api/keys");
+    const msg = redactSecrets('Headers.set: "sb_secret_T84rX\nUMQuq_86eHN1hX" is an invalid header value. bpcrm_abcDEF123');
+    expect(msg).not.toMatch(/T84rX|UMQuq|abcDEF/);
+    expect(msg).toContain("sb_secret_[redacted]");
+    expect(msg).toContain("bpcrm_[redacted]");
+  });
+});

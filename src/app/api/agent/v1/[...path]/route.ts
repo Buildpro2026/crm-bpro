@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { authenticateAgent, KeyCheckError } from "@/lib/agent-api/keys";
+import { authenticateAgent, KeyCheckError, redactSecrets } from "@/lib/agent-api/keys";
 import { routeAgentRequest } from "@/lib/agent-api/handlers";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -16,7 +16,7 @@ async function handle(request: NextRequest, params: Promise<{ path: string[] }>)
     agent = await authenticateAgent(request.headers.get("authorization"));
   } catch (err) {
     // Details stay in the server log; the caller learns only that the server, not its key, failed.
-    console.error("agent key check failed:", err instanceof KeyCheckError ? err.message : err);
+    console.error("agent key check failed:", err instanceof KeyCheckError ? err.message : redactSecrets(String(err)));
     return NextResponse.json({ error: "Key check failed on the server. The key was not judged." }, { status: 503 });
   }
   if (!agent) return NextResponse.json({ error: "Missing or invalid API key." }, { status: 401 });

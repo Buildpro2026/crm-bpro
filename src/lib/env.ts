@@ -12,15 +12,21 @@ function read(name: string): string {
   return value;
 }
 
+// API keys never contain whitespace. A line break pasted into a key on Vercel made every
+// service-role request fail ("invalid header value") and every agent call answer 401.
+function readKey(name: string): string {
+  return read(name).replace(/\s+/g, "");
+}
+
 export const env = {
   get supabaseUrl(): string {
     return read("SUPABASE_URL").replace(/\/$/, "");
   },
   get publishableKey(): string {
-    return read("SUPABASE_PUBLISHABLE_KEY");
+    return readKey("SUPABASE_PUBLISHABLE_KEY");
   },
   get serviceRoleKey(): string {
-    return read("SUPABASE_SERVICE_ROLE_KEY");
+    return readKey("SUPABASE_SERVICE_ROLE_KEY");
   },
   get appBaseUrl(): string {
     return read("APP_BASE_URL").replace(/\/$/, "");
