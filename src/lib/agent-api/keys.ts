@@ -28,6 +28,15 @@ export class KeyCheckError extends Error {
   name = "KeyCheckError";
 }
 
+// Errors from the HTTP layer can quote header values, which include the service key.
+// Never let a key reach a log line.
+export function redactSecrets(message: string): string {
+  return message
+    .replace(/sb_(secret|publishable)_[A-Za-z0-9_\-\s]*/g, "sb_$1_[redacted]")
+    .replace(/eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+/g, "[redacted-jwt]")
+    .replace(/bpcrm_[A-Za-z0-9_\-]+/g, "bpcrm_[redacted]");
+}
+
 // Returns the agent for a valid, unrevoked key, or null for a missing, malformed,
 // unknown or revoked key. Throws KeyCheckError when the lookup itself fails.
 export async function authenticateAgent(authorization: string | null): Promise<Agent | null> {
@@ -41,10 +50,10 @@ export async function authenticateAgent(authorization: string | null): Promise<A
       .eq("key_hash", sha256Hex(token))
       .maybeSingle();
   } catch (err) {
-    throw new KeyCheckError(err instanceof Error ? err.message : String(err));
+    throw new KeyCheckError(redactSecrets(err instanceof Error ? err.message : String(err)));
   }
   const { data, error } = result;
-  if (error) throw new KeyCheckError(error.message);
+  if (error) throw new KeyCheckError(redactSecrets(error.message));
   if (!data || data.revoked_at) return null;
   const admin = createAdminClient();
   await admin.from("api_keys").update({ last_used_at: new Date().toISOString() }).eq("id", data.id);
