@@ -22,17 +22,31 @@ export function bearerToken(authorization: string | null): string | null {
 
 export type Agent = { keyId: string; name: string; actor: string };
 
-// Returns the agent for a valid, unrevoked key, or null.
+// The key could not be checked (database unreachable or server misconfigured).
+// Distinct from a wrong key, so a server fault is never reported as "invalid API key".
+export class KeyCheckError extends Error {
+  name = "KeyCheckError";
+}
+
+// Returns the agent for a valid, unrevoked key, or null for a missing, malformed,
+// unknown or revoked key. Throws KeyCheckError when the lookup itself fails.
 export async function authenticateAgent(authorization: string | null): Promise<Agent | null> {
   const token = bearerToken(authorization);
   if (!token) return null;
-  const admin = createAdminClient();
-  const { data } = await admin
-    .from("api_keys")
-    .select("id, name, revoked_at")
-    .eq("key_hash", sha256Hex(token))
-    .maybeSingle();
+  let result;
+  try {
+    result = await createAdminClient()
+      .from("api_keys")
+      .select("id, name, revoked_at")
+      .eq("key_hash", sha256Hex(token))
+      .maybeSingle();
+  } catch (err) {
+    throw new KeyCheckError(err instanceof Error ? err.message : String(err));
+  }
+  const { data, error } = result;
+  if (error) throw new KeyCheckError(error.message);
   if (!data || data.revoked_at) return null;
+  const admin = createAdminClient();
   await admin.from("api_keys").update({ last_used_at: new Date().toISOString() }).eq("id", data.id);
   const slug = data.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "agent";
   return { keyId: data.id, name: data.name, actor: `agent:${slug}` };
