@@ -1,8 +1,8 @@
 # BuildPro CRM agent API
 
 BuildPro's own agents (Chad, Muse) use this API instead of HubSpot. It covers what the agents did in HubSpot:
-find a person by email, create candidates, companies and contacts, add notes and tasks, update records, and read
-deals.
+find a person by email, create candidates, companies, contacts and deals, add notes and tasks, update records, and
+read deals and client agreements.
 
 ## Access
 
@@ -36,8 +36,14 @@ deals.
 | `POST /tasks` | Add a task: `title`, optional `details`, `due_date` (YYYY-MM-DD), `priority` (low, normal, high), and links as for notes. |
 | `GET /notes/{id}` | One note. |
 | `GET /deals?stage=&company_id=&limit=` | List deals. |
+| `POST /deals` | Create a deal. Needs `name` and `company_id`. An open deal (not won or lost) with the same name at the same company is returned with `created: false` instead of a duplicate. A `contact_id` must belong to that company. |
 | `GET /deals/{id}` | One deal. |
 | `PATCH /deals/{id}` | Update a deal, including `stage`. |
+| `GET /agreements?status=&company_id=&limit=` | Client agreements, read-only: status (created, viewed, client signed, fully executed, expired, revoked), signer name and title, and when it was signed and countersigned. |
+| `GET /agreements/{id}` | One agreement, same fields. |
+
+Agreements are read-only for agents. They cannot create, send, sign, countersign or revoke one; Lee does that in the
+CRM. The access token hash, signer email, IP address, signature image and form answers are never returned.
 
 ### Fields
 

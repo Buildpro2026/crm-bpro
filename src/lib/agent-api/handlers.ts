@@ -92,10 +92,16 @@ export async function routeAgentRequest(method: string, segments: string[], ctx:
       return createTask(ctx);
     case "GET deals":
       return listDeals(ctx);
+    case "POST deals":
+      return createDeal(ctx);
     case "GET deals/:id":
       return getDeal(ctx, id!);
     case "PATCH deals/:id":
       return updateDeal(ctx, id!);
+    case "GET agreements":
+      return listAgreements(ctx);
+    case "GET agreements/:id":
+      return getAgreement(ctx, id!);
     default:
       return fail(404, "Not found.");
   }
@@ -390,6 +396,39 @@ async function listDeals({ db, query }: Ctx): Promise<ApiResult> {
   return ok({ deals: data });
 }
 
+// Create a deal. An open deal (not won or lost) with the same name at the same company is returned
+// instead with created: false, so an agent that retries does not make duplicates.
+async function createDeal({ db, agent, body }: Ctx): Promise<ApiResult> {
+  const result = validateDealInput(strings(body, DEAL_FIELD_NAMES));
+  if (!result.ok) return fail(422, "Invalid deal.", result.errors);
+  const d = result.data;
+  const { data: company } = await db.from("companies").select("id").eq("id", d.company_id).maybeSingle();
+  if (!company) return fail(422, "Invalid deal.", { company_id: "That company was not found." });
+  if (d.contact_id) {
+    const { data: contact } = await db.from("contacts").select("id, company_id").eq("id", d.contact_id).maybeSingle();
+    if (!contact || contact.company_id !== d.company_id) {
+      return fail(422, "Invalid deal.", { contact_id: "That contact was not found at this company." });
+    }
+  }
+  const { data: existing } = await db
+    .from("deals")
+    .select("*")
+    .eq("company_id", d.company_id)
+    .ilike("name", d.name.replace(/[\\%_]/g, (c) => `\\${c}`))
+    .not("stage", "in", "(won,lost)")
+    .limit(1);
+  if (existing && existing.length > 0) return ok({ deal: existing[0], created: false });
+  const { data, error } = await db.from("deals").insert(d).select("*").single();
+  if (error || !data) return fail(500, error?.message ?? "Could not create the deal.");
+  await writeAudit(db, {
+    actor: agent.actor,
+    action: "deal_created",
+    companyId: data.company_id,
+    detail: { deal_id: data.id, name: data.name, stage: data.stage, via: "agent_api" },
+  });
+  return ok({ deal: data, created: true }, 201);
+}
+
 async function getDeal({ db }: Ctx, id: string): Promise<ApiResult> {
   const { data } = await db.from("deals").select("*").eq("id", id).maybeSingle();
   return data ? ok({ deal: data }) : fail(404, "Deal not found.");
@@ -412,4 +451,33 @@ async function updateDeal({ db, agent, body }: Ctx, id: string): Promise<ApiResu
     });
   }
   return ok({ deal: data });
+}
+
+// ---------------------------------------------------------------------------
+// Agreements (read-only). Agents can see whether a client agreement was sent, viewed, signed or
+// fully executed. They cannot create, send, sign, countersign or revoke one; Lee does that in the CRM.
+// Columns are listed so the access token hash, signer IP, signature image and form answers never leave.
+// ---------------------------------------------------------------------------
+
+const AGREEMENT_COLUMNS =
+  "id, company_id, contact_id, template_key, template_version, status, expires_at, revoked_at, " +
+  "form_submitted_at, signer_name, signer_title, client_signed_at, countersigned_at, created_at, updated_at";
+export const AGREEMENT_STATUSES = ["created", "viewed", "client signed", "fully executed", "expired", "revoked"] as const;
+
+async function listAgreements({ db, query }: Ctx): Promise<ApiResult> {
+  const status = query.get("status");
+  if (status && !(AGREEMENT_STATUSES as readonly string[]).includes(status)) return fail(400, "Unknown status.");
+  const companyId = query.get("company_id");
+  if (companyId && !isUuid(companyId)) return fail(400, "company_id must be an id.");
+  let q = db.from("signature_requests").select(AGREEMENT_COLUMNS).order("updated_at", { ascending: false }).limit(limitOf(query));
+  if (status) q = q.eq("status", status);
+  if (companyId) q = q.eq("company_id", companyId);
+  const { data, error } = await q;
+  if (error) return fail(500, error.message);
+  return ok({ agreements: data });
+}
+
+async function getAgreement({ db }: Ctx, id: string): Promise<ApiResult> {
+  const { data } = await db.from("signature_requests").select(AGREEMENT_COLUMNS).eq("id", id).maybeSingle();
+  return data ? ok({ agreement: data }) : fail(404, "Agreement not found.");
 }
